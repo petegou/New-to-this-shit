@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGRB Investing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin></script>
+    <script>window.PropTypes = window.PropTypes || propTypes;</script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/recharts@2.10.3/umd/Recharts.min.js"></script>
+    <style>
+        .regime-goldilocks { background-color: rgba(34, 197, 94, 0.1); }
+        .regime-reflation { background-color: rgba(59, 130, 246, 0.1); }
+        .regime-inflation { background-color: rgba(249, 115, 22, 0.1); }
+        .regime-deflation { background-color: rgba(239, 68, 68, 0.1); }
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+        const {
+            LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+            ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell,
+            ComposedChart, Bar, ReferenceLine
+        } = Recharts;
+
+        const API_BASE = 'http://localhost:8000';
+
+        const REGIME_COLORS = {
+            GOLDILOCKS: '#22c55e',
+            REFLATION: '#3b82f6',
+            INFLATION: '#f97316',
+            DEFLATION: '#ef4444'
+        };
+
+        // Utility functions
+        const formatPercent = (value, decimals = 2) => {
+            if (value === null || value === undefined) return '-';
+            const sign = value >= 0 ? '+' : '';
+            return `${sign}${(value * 100).toFixed(decimals)}%`;
+        };
+
+        const formatCurrency = (value) => {
+            if (value === null || value === undefined) return '-';
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency', currency: 'USD',
+                minimumFractionDigits: 0, maximumFractionDigits: 0
+            }).format(value);
+        };
+
+        const formatDate = (dateStr) => {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        };
+
+        const formatScore = (v, decimals = 2) => v != null ? Number(v).toFixed(decimals) : '-';
+
+        // ==================== NAVBAR ====================
+        const NAV_ITEMS = [
+            { id: 'data', label: 'Data' },
+            { id: 'backtest', label: 'Backtest' },
+            { id: 'results', label: 'Results' },
+            { id: 'rankings', label: 'Rankings' },
+        ];
+
+        const Navbar = ({ currentPage, setCurrentPage }) => (
+            <nav className="bg-white shadow-sm border-b">
+                <div className="max-w-7xl mx-auto px-4">
+                    <div className="flex justify-between h-16">
+                        <div className="flex items-center">
+                            <span className="text-xl font-bold text-blue-600">PGRB</span>
+                            <span className="ml-2 text-gray-600">Investing</span>
+                        </div>
+                        <div className="flex space-x-4">
+                            {NAV_ITEMS.map(item => (
+                                <button
+                                    key={item.id}
+                                    onClick={() => setCurrentPage(item.id)}
+                                    className={`px-3 py-2 rounded-md text-sm font-medium ${
+                                        currentPage === item.id
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </nav>
+        );
+
+        // ==================== DATA PAGE ====================
+        const DataPage = ({ dataSummary, setDataSummary }) => {
+            const [uploading, setUploading] = useState(false);
+            const [preview, setPreview] = useState([]);
+            const [error, setError] = useState(null);
+
+            useEffect(() => { fetchSummary(); fetchPreview(); }, []);
+
+            const fetchSummary = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/data/summary`);
+                    if (res.ok) setDataSummary(await res.json());
+                } catch (e) {}
+            };
+
+            const fetchPreview = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/data/preview?n=10`);
+                    if (res.ok) setPreview(await res.json());
+                } catch (e) {}
+            };
+
+            const handleUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setUploading(true); setError(null);
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    const res = await fetch(`${API_BASE}/api/data/upload`, { method: 'POST', body: formData });
+                    if (res.ok) { const data = await res.json(); setDataSummary(data.summary); fetchPreview(); }
+                    else { const err = await res.json(); setError(err.detail); }
+                } catch (e) { setError('Failed to upload file'); }
+                setUploading(false);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="bg-white rounded-lg shadow p-6">
+                        <h2 className="text-lg font-semibold mb-4">Data Upload</h2>
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                            <input type="file" accept=".xlsx,.xls" onChange={handleUpload} className="hidden" id="file-upload" />
+                            <label htmlFor="file-upload" className="cursor-pointer">
+                                {uploading ? (
+                                    <div className="flex items-center justify-center"><div className="loading-spinner mr-2"></div><span>Uploading...</span></div>
+                                ) : (
+                                    <>
+                                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                        </svg>
+                                        <p className="mt-2 text-sm text-gray-600">Click to upload 42 Macro Excel file</p>
+                                    </>
+                                )}
+                            </label>
+                        </div>
+                        {error && <p className="mt-2 text-red-600 text-sm">{error}</p>}
+                    </div>
+
+                    {dataSummary && (
+                        <>
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <h2 className="text-lg font-semibold mb-4">Data Summary</h2>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="bg-gray-50 p-4 rounded">
+                                        <p className="text-sm text-gray-500">Date Range</p>
+                                        <p className="font-semibold">{dataSummary.start_date} - {dataSummary.end_date}</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded">
+                                        <p className="text-sm text-gray-500">Trading Days</p>
+                                        <p className="font-semibold">{dataSummary.trading_days?.toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded">
+                                        <p className="text-sm text-gray-500">Duration</p>
+                                        <p className="font-semibold">{dataSummary.date_range_formatted}</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded">
+                                        <p className="text-sm text-gray-500">Tickers</p>
+                                        <p className="font-semibold">{dataSummary.ticker_count}</p>
+                                    </div>
+                                </div>
+                                <h3 className="text-md font-semibold mt-6 mb-3">Regime Distribution</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {Object.entries(dataSummary.regime_breakdown || {}).map(([regime, days]) => (
+                                        <div key={regime} className="p-4 rounded" style={{ backgroundColor: `${REGIME_COLORS[regime]}20` }}>
+                                            <p className="text-sm" style={{ color: REGIME_COLORS[regime] }}>{regime}</p>
+                                            <p className="font-semibold">{days} days</p>
+                                            <p className="text-sm text-gray-500">{((days / dataSummary.trading_days) * 100).toFixed(1)}%</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <h2 className="text-lg font-semibold mb-4">Recent Data Preview</h2>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead><tr>
+                                            {['Date','Regime','Sum','G','R','I','D','SPY','QQQ'].map(h => (
+                                                <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                                            ))}
+                                        </tr></thead>
+                                        <tbody className="divide-y divide-gray-200">
+                                            {preview.map((row, i) => (
+                                                <tr key={i} className={`regime-${row.regime?.toLowerCase()}`}>
+                                                    <td className="px-4 py-2 text-sm">{row.date}</td>
+                                                    <td className="px-4 py-2 text-sm">
+                                                        <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: REGIME_COLORS[row.regime] }}>{row.regime}</span>
+                                                    </td>
+                                                    <td className="px-4 py-2 text-sm">{row.sum_confirming}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.goldilocks}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.reflation}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.inflation}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.deflation}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.spy_vams}</td>
+                                                    <td className="px-4 py-2 text-sm">{row.qqq_vams}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== BACKTEST PAGE ====================
+        const BacktestPage = ({ dataSummary, setResults, setCurrentPage }) => {
+            const [profiles, setProfiles] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [form, setForm] = useState({
+                name: 'My Backtest', risk_profile_id: 'aggressive',
+                start_date: '2020-01-01', end_date: '2023-12-31',
+                starting_value: 100000, benchmark_ticker: 'SPY'
+            });
+
+            useEffect(() => { fetchProfiles(); }, []);
+
+            const fetchProfiles = async () => {
+                try { const res = await fetch(`${API_BASE}/api/risk-profiles`); if (res.ok) setProfiles(await res.json()); } catch (e) {}
+            };
+
+            const runBacktest = async () => {
+                if (!dataSummary) { setError('Please upload data first'); return; }
+                setLoading(true); setError(null);
+                try {
+                    const res = await fetch(`${API_BASE}/api/backtest`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        const resultsRes = await fetch(`${API_BASE}/api/backtest/${data.backtest_id}`);
+                        if (resultsRes.ok) { const full = await resultsRes.json(); setResults(full.results); setCurrentPage('results'); }
+                    } else { const err = await res.json(); setError(err.detail); }
+                } catch (e) { setError('Failed to run backtest'); }
+                setLoading(false);
+            };
+
+            const selectedProfile = profiles.find(p => p.id === form.risk_profile_id);
+
+            return (
+                <div className="space-y-6">
+                    <div className="bg-white rounded-lg shadow p-6">
+                        <h2 className="text-lg font-semibold mb-4">Create Backtest</h2>
+                        {!dataSummary && (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
+                                <p className="text-yellow-700">Please upload 42 Macro data first on the Data page.</p>
+                            </div>
+                        )}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Backtest Name</label>
+                                <input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded-md px-3 py-2" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Risk Profile</label>
+                                <select value={form.risk_profile_id} onChange={e => setForm({...form, risk_profile_id: e.target.value})} className="w-full border rounded-md px-3 py-2">
+                                    {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                                <input type="date" value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} className="w-full border rounded-md px-3 py-2" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                                <input type="date" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} className="w-full border rounded-md px-3 py-2" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Starting Value ($)</label>
+                                <input type="number" value={form.starting_value} onChange={e => setForm({...form, starting_value: parseFloat(e.target.value)})} className="w-full border rounded-md px-3 py-2" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Benchmark</label>
+                                <select value={form.benchmark_ticker} onChange={e => setForm({...form, benchmark_ticker: e.target.value})} className="w-full border rounded-md px-3 py-2">
+                                    <option value="SPY">SPY (S&P 500)</option>
+                                    <option value="QQQ">QQQ (Nasdaq 100)</option>
+                                    <option value="IWM">IWM (Russell 2000)</option>
+                                    <option value="AGG">AGG (US Bonds)</option>
+                                    <option value="GLD">GLD (Gold)</option>
+                                </select>
+                            </div>
+                        </div>
+                        {error && <p className="mt-4 text-red-600 text-sm">{error}</p>}
+                        <button onClick={runBacktest} disabled={loading || !dataSummary}
+                            className="mt-6 w-full bg-blue-600 text-white py-3 rounded-md font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center">
+                            {loading ? (<><div className="loading-spinner mr-2"></div>Running Backtest...</>) : 'Run Backtest'}
+                        </button>
+                    </div>
+                    {selectedProfile && (
+                        <div className="bg-white rounded-lg shadow p-6">
+                            <h2 className="text-lg font-semibold mb-4">{selectedProfile.name} Profile Allocations</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {Object.entries(selectedProfile.allocations || {}).map(([regime, allocs]) => (
+                                    <div key={regime} className="p-4 rounded" style={{ backgroundColor: `${REGIME_COLORS[regime]}15` }}>
+                                        <h3 className="font-medium mb-2" style={{ color: REGIME_COLORS[regime] }}>{regime}</h3>
+                                        <ul className="text-sm space-y-1">
+                                            {Object.entries(allocs || {}).slice(0, 6).map(([ticker, weight]) => (
+                                                <li key={ticker} className="flex justify-between"><span>{ticker}</span><span className="text-gray-600">{(weight * 100).toFixed(0)}%</span></li>
+                                            ))}
+                                            {Object.keys(allocs || {}).length > 6 && <li className="text-gray-400">+{Object.keys(allocs).length - 6} more</li>}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== RESULTS PAGE ====================
+        const StatCard = ({ label, value, benchmark, positive }) => (
+            <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm text-gray-500">{label}</p>
+                <p className={`text-xl font-bold ${positive === undefined ? '' : positive ? 'text-green-600' : 'text-red-600'}`}>{value}</p>
+                {benchmark && <p className="text-sm text-gray-400">vs {benchmark}</p>}
+            </div>
+        );
+
+        const ResultsPage = ({ results }) => {
+            const [activeTab, setActiveTab] = useState('summary');
+            if (!results) return <div className="bg-white rounded-lg shadow p-8 text-center"><p className="text-gray-500">No backtest results yet. Run a backtest first.</p></div>;
+
+            const tabs = [{ id: 'summary', label: 'Summary' }, { id: 'performance', label: 'Performance' }, { id: 'risk', label: 'Risk' }, { id: 'trades', label: 'Trades' }];
+
+            return (
+                <div className="space-y-6">
+                    <div className="bg-white rounded-lg shadow">
+                        <div className="border-b">
+                            <div className="flex space-x-4 px-6">
+                                {tabs.map(tab => (
+                                    <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                                        className={`py-4 px-2 border-b-2 font-medium text-sm ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-6">
+                            {activeTab === 'summary' && <SummaryTab results={results} />}
+                            {activeTab === 'performance' && <PerformanceTab results={results} />}
+                            {activeTab === 'risk' && <RiskTab results={results} />}
+                            {activeTab === 'trades' && <TradesTab results={results} />}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SummaryTab = ({ results }) => {
+            const { summary, risk_metrics, regime_stats, final_holdings } = results;
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <StatCard label="Total Return" value={formatPercent(summary.total_return)} benchmark={formatPercent(summary.benchmark_total_return)} positive={summary.total_return > summary.benchmark_total_return} />
+                        <StatCard label="Annualized Return" value={formatPercent(summary.annualized_return)} benchmark={formatPercent(summary.benchmark_annualized_return)} positive={summary.annualized_return > summary.benchmark_annualized_return} />
+                        <StatCard label="Sharpe Ratio" value={risk_metrics.sharpe_ratio.toFixed(2)} positive={risk_metrics.sharpe_ratio > 0} />
+                        <StatCard label="Max Drawdown" value={formatPercent(-risk_metrics.max_drawdown)} positive={false} />
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-gray-50 p-6 rounded-lg">
+                            <h3 className="font-semibold mb-4">Portfolio Value</h3>
+                            <div className="flex justify-between items-end">
+                                <div><p className="text-sm text-gray-500">Starting</p><p className="text-2xl font-bold">{formatCurrency(summary.starting_value)}</p></div>
+                                <div className="text-3xl text-gray-300">&#8594;</div>
+                                <div className="text-right"><p className="text-sm text-gray-500">Ending</p><p className={`text-2xl font-bold ${summary.ending_value > summary.starting_value ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(summary.ending_value)}</p></div>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 p-6 rounded-lg">
+                            <h3 className="font-semibold mb-4">Regime Performance</h3>
+                            <div className="space-y-3">
+                                {regime_stats.map(stat => (
+                                    <div key={stat.regime} className="flex items-center justify-between">
+                                        <div className="flex items-center"><div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: stat.color }} /><span className="text-sm">{stat.regime}</span></div>
+                                        <div className="flex items-center space-x-4 text-sm">
+                                            <span className="text-gray-500">{stat.days} days ({stat.pct_time.toFixed(1)}%)</span>
+                                            <span className={stat.total_return >= 0 ? 'text-green-600' : 'text-red-600'}>{formatPercent(stat.total_return)}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    {final_holdings.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold mb-4">Current Holdings</h3>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50"><tr>
+                                        {['Ticker','Shares','Price','Value','Weight','Return'].map(h => (
+                                            <th key={h} className={`px-4 py-2 text-xs font-medium text-gray-500 ${h==='Ticker' ? 'text-left' : 'text-right'}`}>{h}</th>
+                                        ))}
+                                    </tr></thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                        {final_holdings.sort((a, b) => b.weight - a.weight).map((h, i) => (
+                                            <tr key={i}>
+                                                <td className="px-4 py-2 font-medium">{h.ticker}</td>
+                                                <td className="px-4 py-2 text-right">{h.shares.toFixed(2)}</td>
+                                                <td className="px-4 py-2 text-right">${h.price.toFixed(2)}</td>
+                                                <td className="px-4 py-2 text-right">{formatCurrency(h.value)}</td>
+                                                <td className="px-4 py-2 text-right">{(h.weight * 100).toFixed(1)}%</td>
+                                                <td className={`px-4 py-2 text-right ${h.return >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(h.return)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const PerformanceTab = ({ results }) => {
+            const { equity_curve, regime_stats } = results;
+            const chartData = equity_curve.map(p => ({ date: p.date.split('T')[0], portfolio: p.portfolio_value, benchmark: p.benchmark_value, regime: p.regime }));
+            const sampleRate = Math.max(1, Math.floor(chartData.length / 500));
+            const sampledData = chartData.filter((_, i) => i % sampleRate === 0 || i === chartData.length - 1);
+
+            return (
+                <div className="space-y-6">
+                    <div>
+                        <h3 className="font-semibold mb-4">Portfolio vs Benchmark</h3>
+                        <div className="h-96">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={sampledData}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="date" tick={{ fontSize: 12 }} tickFormatter={v => v.substring(0,7)} />
+                                    <YAxis tick={{ fontSize: 12 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                                    <Tooltip formatter={v => formatCurrency(v)} labelFormatter={l => formatDate(l)} />
+                                    <Legend />
+                                    <Line type="monotone" dataKey="portfolio" stroke="#3b82f6" dot={false} name="Portfolio" />
+                                    <Line type="monotone" dataKey="benchmark" stroke="#9ca3af" dot={false} name="Benchmark" />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                            <h3 className="font-semibold mb-4">Time in Each Regime</h3>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie data={regime_stats} dataKey="days" nameKey="regime" cx="50%" cy="50%" outerRadius={80}
+                                            label={({ regime, pct_time }) => `${regime} (${pct_time.toFixed(0)}%)`}>
+                                            {regime_stats.map((e, i) => <Cell key={i} fill={e.color} />)}
+                                        </Pie>
+                                        <Tooltip formatter={v => `${v} days`} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 className="font-semibold mb-4">Trailing Returns</h3>
+                            <table className="min-w-full">
+                                <thead><tr>{['Period','Portfolio','Benchmark','Diff'].map(h => <th key={h} className={`text-sm text-gray-500 pb-2 ${h==='Period'?'text-left':'text-right'}`}>{h}</th>)}</tr></thead>
+                                <tbody>
+                                    {Object.entries(results.trailing_returns).map(([period, ret]) => {
+                                        const benchRet = results.benchmark_trailing_returns[period] || 0;
+                                        const diff = ret - benchRet;
+                                        return (
+                                            <tr key={period} className="border-t">
+                                                <td className="py-2 font-medium">{period}</td>
+                                                <td className={`py-2 text-right ${ret >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(ret)}</td>
+                                                <td className={`py-2 text-right ${benchRet >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(benchRet)}</td>
+                                                <td className={`py-2 text-right ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(diff)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RiskTab = ({ results }) => {
+            const { risk_metrics, top_drawdowns, drawdown_series } = results;
+            const sampleRate = Math.max(1, Math.floor(drawdown_series.length / 500));
+            const sampledDrawdown = drawdown_series.filter((_, i) => i % sampleRate === 0);
+
+            return (
+                <div className="space-y-6">
+                    <div>
+                        <h3 className="font-semibold mb-4">Risk Metrics</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {[
+                                { label: 'Annualized Std Dev', value: formatPercent(risk_metrics.std_dev_annualized) },
+                                { label: 'Sharpe Ratio', value: risk_metrics.sharpe_ratio.toFixed(2) },
+                                { label: 'Sortino Ratio', value: risk_metrics.sortino_ratio.toFixed(2) },
+                                { label: 'Calmar Ratio', value: risk_metrics.calmar_ratio.toFixed(2) },
+                                { label: 'Max Drawdown', value: formatPercent(-risk_metrics.max_drawdown) },
+                                { label: 'Beta', value: risk_metrics.beta.toFixed(2) },
+                                { label: 'Alpha', value: formatPercent(risk_metrics.alpha) },
+                                { label: 'Information Ratio', value: risk_metrics.information_ratio.toFixed(2) },
+                                { label: 'Upside Capture', value: `${risk_metrics.upside_capture.toFixed(0)}%` },
+                                { label: 'Downside Capture', value: `${risk_metrics.downside_capture.toFixed(0)}%` },
+                                { label: 'Positive Months', value: `${risk_metrics.positive_months_pct.toFixed(0)}%` },
+                            ].map(m => <div key={m.label} className="bg-gray-50 p-4 rounded"><p className="text-sm text-gray-500">{m.label}</p><p className="text-lg font-semibold">{m.value}</p></div>)}
+                        </div>
+                    </div>
+                    <div>
+                        <h3 className="font-semibold mb-4">Drawdown Over Time</h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={sampledDrawdown}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="date" tick={{ fontSize: 12 }} tickFormatter={v => v.substring(0,7)} />
+                                    <YAxis tick={{ fontSize: 12 }} tickFormatter={v => `${(v * 100).toFixed(0)}%`} />
+                                    <Tooltip formatter={v => formatPercent(v)} labelFormatter={l => formatDate(l)} />
+                                    <Area type="monotone" dataKey="drawdown" stroke="#ef4444" fill="#fee2e2" name="Drawdown" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 className="font-semibold mb-4">Top Drawdowns</h3>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50"><tr>{['#','Drawdown','Start','Low','End','Length','Recovery'].map(h => <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>)}</tr></thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {top_drawdowns.map((dd, i) => (
+                                        <tr key={i}>
+                                            <td className="px-4 py-2">{i+1}</td>
+                                            <td className="px-4 py-2 text-red-600 font-medium">{formatPercent(-dd.drawdown_pct)}</td>
+                                            <td className="px-4 py-2">{formatDate(dd.start_date)}</td>
+                                            <td className="px-4 py-2">{formatDate(dd.low_date)}</td>
+                                            <td className="px-4 py-2">{dd.end_date ? formatDate(dd.end_date) : 'Ongoing'}</td>
+                                            <td className="px-4 py-2">{dd.length_days} days</td>
+                                            <td className="px-4 py-2">{dd.recovery_days ? `${dd.recovery_days} days` : '-'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const TradesTab = ({ results }) => {
+            const { trades, total_trades } = results;
+            const [filter, setFilter] = useState({ action: '', ticker: '' });
+            const [page, setPage] = useState(0);
+            const pageSize = 50;
+
+            const filteredTrades = trades.filter(t => {
+                if (filter.action && t.action !== filter.action) return false;
+                if (filter.ticker && !t.ticker.toLowerCase().includes(filter.ticker.toLowerCase())) return false;
+                return true;
+            });
+            const paginatedTrades = filteredTrades.slice(page * pageSize, (page + 1) * pageSize);
+            const totalPages = Math.ceil(filteredTrades.length / pageSize);
+            const buys = trades.filter(t => t.action === 'BUY');
+            const sells = trades.filter(t => t.action === 'SELL');
+            const totalVolume = trades.reduce((sum, t) => sum + t.value, 0);
+            const regimeChanges = new Set(trades.filter(t => t.reason.includes('Regime change')).map(t => t.date)).size;
+
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="bg-gray-50 p-4 rounded"><p className="text-sm text-gray-500">Total Trades</p><p className="text-xl font-bold">{total_trades}</p></div>
+                        <div className="bg-green-50 p-4 rounded"><p className="text-sm text-green-600">Buys</p><p className="text-xl font-bold text-green-700">{buys.length}</p></div>
+                        <div className="bg-red-50 p-4 rounded"><p className="text-sm text-red-600">Sells</p><p className="text-xl font-bold text-red-700">{sells.length}</p></div>
+                        <div className="bg-gray-50 p-4 rounded"><p className="text-sm text-gray-500">Regime Changes</p><p className="text-xl font-bold">{regimeChanges}</p></div>
+                        <div className="bg-gray-50 p-4 rounded"><p className="text-sm text-gray-500">Total Volume</p><p className="text-xl font-bold">{formatCurrency(totalVolume)}</p></div>
+                    </div>
+                    <div className="flex space-x-4">
+                        <select value={filter.action} onChange={e => { setFilter({...filter, action: e.target.value}); setPage(0); }} className="border rounded px-3 py-2">
+                            <option value="">All Actions</option><option value="BUY">Buy</option><option value="SELL">Sell</option>
+                        </select>
+                        <input type="text" placeholder="Filter by ticker..." value={filter.ticker} onChange={e => { setFilter({...filter, ticker: e.target.value}); setPage(0); }} className="border rounded px-3 py-2" />
+                        <span className="py-2 text-sm text-gray-500">Showing {filteredTrades.length} trades</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50"><tr>{['Date','Action','Ticker','Shares','Price','Value','Regime','Reason'].map(h => <th key={h} className={`px-4 py-2 text-xs font-medium text-gray-500 ${['Shares','Price','Value'].includes(h)?'text-right':'text-left'}`}>{h}</th>)}</tr></thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {paginatedTrades.map((trade, i) => (
+                                    <tr key={i} className={trade.action === 'BUY' ? 'bg-green-50' : 'bg-red-50'}>
+                                        <td className="px-4 py-2 text-sm">{formatDate(trade.date)}</td>
+                                        <td className="px-4 py-2"><span className={`px-2 py-1 rounded text-xs font-medium ${trade.action === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{trade.action}</span></td>
+                                        <td className="px-4 py-2 font-medium">{trade.ticker}</td>
+                                        <td className="px-4 py-2 text-right">{trade.shares.toFixed(2)}</td>
+                                        <td className="px-4 py-2 text-right">${trade.price.toFixed(2)}</td>
+                                        <td className="px-4 py-2 text-right">{formatCurrency(trade.value)}</td>
+                                        <td className="px-4 py-2"><span className="px-2 py-1 rounded text-xs text-white" style={{ backgroundColor: REGIME_COLORS[trade.regime] }}>{trade.regime}</span></td>
+                                        <td className="px-4 py-2 text-sm text-gray-600 max-w-xs truncate">{trade.reason}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    {totalPages > 1 && (
+                        <div className="flex justify-between items-center">
+                            <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page === 0} className="px-4 py-2 border rounded disabled:opacity-50">Previous</button>
+                            <span className="text-sm text-gray-500">Page {page + 1} of {totalPages}</span>
+                            <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page >= totalPages-1} className="px-4 py-2 border rounded disabled:opacity-50">Next</button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== RANKINGS PAGE ====================
+        const RankingsPage = () => {
+            const [funds, setFunds] = useState([]);
+            const [categories, setCategories] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedCategory, setSelectedCategory] = useState('');
+            const [search, setSearch] = useState('');
+            const [sortField, setSortField] = useState('gpa_score');
+            const [sortOrder, setSortOrder] = useState('desc');
+            const [page, setPage] = useState(1);
+            const [total, setTotal] = useState(0);
+            const [expandedTicker, setExpandedTicker] = useState(null);
+            const [categorySummary, setCategorySummary] = useState(null);
+            const [dataAsOf, setDataAsOf] = useState(null);
+            const [uploading, setUploading] = useState(false);
+            const [uploadResult, setUploadResult] = useState(null);
+            const [showUpload, setShowUpload] = useState(false);
+            const [recalculating, setRecalculating] = useState(false);
+            const limit = 25;
+
+            useEffect(() => { fetchCategories(); }, []);
+            useEffect(() => { fetchRankings(); }, [selectedCategory, search, sortField, sortOrder, page]);
+
+            const fetchCategories = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/rankings/categories`);
+                    if (res.ok) setCategories(await res.json());
+                } catch (e) { console.error('Failed to fetch categories', e); }
+            };
+
+            const fetchRankings = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams({ sort: sortField, order: sortOrder, page: page.toString(), limit: limit.toString() });
+                    if (selectedCategory) params.set('category', selectedCategory);
+                    if (search) params.set('search', search);
+                    const res = await fetch(`${API_BASE}/api/rankings/scores?${params}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        setFunds(data.funds || []);
+                        setTotal(data.total || 0);
+                        setCategorySummary(data.category_summary || null);
+                        setDataAsOf(data.data_as_of || null);
+                    }
+                } catch (e) { console.error('Failed to fetch rankings', e); }
+                setLoading(false);
+            };
+
+            const handleSort = (field) => {
+                if (sortField === field) setSortOrder(o => o === 'desc' ? 'asc' : 'desc');
+                else { setSortField(field); setSortOrder('desc'); }
+                setPage(1);
+            };
+
+            const handleUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setUploading(true); setUploadResult(null);
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    const res = await fetch(`${API_BASE}/api/rankings/funds/upload`, { method: 'POST', body: formData });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setUploadResult(data);
+                        fetchRankings();
+                        fetchCategories();
+                    } else {
+                        const err = await res.json();
+                        setUploadResult({ errors: 1, error_details: [err.detail || 'Upload failed'] });
+                    }
+                } catch (e) { setUploadResult({ errors: 1, error_details: ['Upload failed'] }); }
+                setUploading(false);
+            };
+
+            const handleRecalculate = async () => {
+                setRecalculating(true);
+                try {
+                    const res = await fetch(`${API_BASE}/api/rankings/recalculate`, { method: 'POST' });
+                    if (res.ok) fetchRankings();
+                } catch (e) { console.error('Recalculate failed', e); }
+                setRecalculating(false);
+            };
+
+            const handleExport = (format) => {
+                const params = new URLSearchParams({ format });
+                if (selectedCategory) params.set('category', selectedCategory);
+                window.open(`${API_BASE}/api/rankings/export?${params}`, '_blank');
+            };
+
+            const handleDownloadTemplate = () => {
+                window.open(`${API_BASE}/api/rankings/template`, '_blank');
+            };
+
+            const totalPages = Math.ceil(total / limit);
+
+            // Group categories by parent
+            const groupedCategories = {};
+            categories.forEach(cat => {
+                const parent = cat.parent_category || 'Other';
+                if (!groupedCategories[parent]) groupedCategories[parent] = [];
+                groupedCategories[parent].push(cat);
+            });
+
+            const SortHeader = ({ field, label }) => {
+                const isActive = sortField === field;
+                return (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                        onClick={() => handleSort(field)}>
+                        <div className="flex items-center space-x-1">
+                            <span>{label}</span>
+                            {isActive && <span className="text-blue-600">{sortOrder === 'desc' ? ' \u25BC' : ' \u25B2'}</span>}
+                        </div>
+                    </th>
+                );
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="bg-white rounded-lg shadow p-6">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">Fund Rankings</h2>
+                                {dataAsOf && <p className="text-sm text-gray-500 mt-1">Data as of: {dataAsOf}</p>}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => setShowUpload(!showUpload)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700">
+                                    Upload Data
+                                </button>
+                                <button onClick={handleDownloadTemplate}
+                                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-200">
+                                    Download Template
+                                </button>
+                                <button onClick={handleRecalculate} disabled={recalculating}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:bg-gray-300">
+                                    {recalculating ? 'Recalculating...' : 'Recalculate Rankings'}
+                                </button>
+                                <div className="relative group">
+                                    <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-200">
+                                        Export &#9662;
+                                    </button>
+                                    <div className="absolute right-0 mt-1 w-40 bg-white rounded-md shadow-lg border hidden group-hover:block z-10">
+                                        <button onClick={() => handleExport('csv')} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Export CSV</button>
+                                        <button onClick={() => handleExport('xlsx')} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Export Excel</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Upload Section */}
+                        {showUpload && (
+                            <div className="mt-4 border-t pt-4">
+                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                                    <input type="file" accept=".xlsx,.xls,.csv" onChange={handleUpload} className="hidden" id="rankings-upload" />
+                                    <label htmlFor="rankings-upload" className="cursor-pointer">
+                                        {uploading ? (
+                                            <div className="flex items-center justify-center"><div className="loading-spinner mr-2"></div><span>Uploading...</span></div>
+                                        ) : (
+                                            <p className="text-sm text-gray-600">Click to upload fund data (Excel or CSV)</p>
+                                        )}
+                                    </label>
+                                </div>
+                                {uploadResult && (
+                                    <div className={`mt-3 p-3 rounded text-sm ${uploadResult.errors > 0 && !uploadResult.added && !uploadResult.updated ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+                                        {uploadResult.added != null && <span>Added: {uploadResult.added} | Updated: {uploadResult.updated} | Errors: {uploadResult.errors}</span>}
+                                        {uploadResult.error_details?.length > 0 && (
+                                            <ul className="mt-2 list-disc list-inside text-red-600">
+                                                {uploadResult.error_details.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Filters */}
+                    <div className="bg-white rounded-lg shadow p-4">
+                        <div className="flex flex-col md:flex-row gap-4">
+                            <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Category Filter</label>
+                                <select value={selectedCategory} onChange={e => { setSelectedCategory(e.target.value); setPage(1); }}
+                                    className="w-full border rounded-md px-3 py-2 text-sm">
+                                    <option value="">All Funds ({total})</option>
+                                    {Object.entries(groupedCategories).map(([parent, cats]) => (
+                                        <optgroup key={parent} label={`-- ${parent} --`}>
+                                            {cats.map(cat => (
+                                                <option key={cat.id} value={cat.id}>
+                                                    {cat.name} ({cat.fund_count})
+                                                </option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                                <input type="text" placeholder="Search by ticker or name..."
+                                    value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+                                    className="w-full border rounded-md px-3 py-2 text-sm" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Category Summary */}
+                    {categorySummary && (
+                        <div className="bg-blue-50 rounded-lg shadow p-4">
+                            <div className="flex flex-wrap items-center gap-6">
+                                <div>
+                                    <span className="font-semibold text-blue-800">{categorySummary.category_name}</span>
+                                    <span className="text-blue-600 ml-2">({categorySummary.fund_count} funds)</span>
+                                </div>
+                                <div className="text-sm text-blue-700">
+                                    Avg GPA: <span className="font-semibold">{formatScore(categorySummary.avg_gpa)}</span>
+                                </div>
+                                <div className="text-sm text-blue-700">
+                                    Highest: <span className="font-semibold">{formatScore(categorySummary.highest_gpa)}</span>
+                                    {categorySummary.highest_gpa_ticker && <span className="ml-1">({categorySummary.highest_gpa_ticker})</span>}
+                                </div>
+                                <div className="text-sm text-blue-700">
+                                    Lowest: <span className="font-semibold">{formatScore(categorySummary.lowest_gpa)}</span>
+                                </div>
+                                {categorySummary.avg_expense != null && (
+                                    <div className="text-sm text-blue-700">
+                                        Avg Expense: <span className="font-semibold">{(categorySummary.avg_expense * 100).toFixed(2)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Rankings Table */}
+                    <div className="bg-white rounded-lg shadow overflow-hidden">
+                        {loading ? (
+                            <div className="p-8 flex justify-center"><div className="loading-spinner"></div></div>
+                        ) : funds.length === 0 ? (
+                            <div className="p-8 text-center text-gray-500">
+                                <p className="text-lg mb-2">No funds found</p>
+                                <p className="text-sm">Upload fund data to get started with rankings.</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
+                                            <SortHeader field="global_rank" label="Rank" />
+                                            <SortHeader field="ticker" label="Ticker" />
+                                            <SortHeader field="name" label="Name" />
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                                            <SortHeader field="gpa_score" label="GPA Score" />
+                                            <SortHeader field="risk_score" label="Risk Score" />
+                                            <SortHeader field="return_score" label="Return Score" />
+                                            <SortHeader field="rr_score" label="RR Score" />
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                        {funds.map((fund, idx) => (
+                                            <React.Fragment key={fund.ticker}>
+                                                <tr className={`hover:bg-gray-50 cursor-pointer ${expandedTicker === fund.ticker ? 'bg-blue-50' : ''}`}
+                                                    onClick={() => setExpandedTicker(expandedTicker === fund.ticker ? null : fund.ticker)}>
+                                                    <td className="px-4 py-3 text-sm text-gray-400">
+                                                        {expandedTicker === fund.ticker ? '\u25BC' : '\u25B6'}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-800 text-sm font-bold">
+                                                            {fund.rank}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-semibold text-blue-600">{fund.ticker}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">{fund.name || '-'}</td>
+                                                    <td className="px-4 py-3 text-sm">
+                                                        <span className={`px-2 py-1 rounded text-xs font-medium ${fund.fund_type === 'ETF' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                            {fund.fund_type || '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-gray-600">{fund.category_name || '-'}</td>
+                                                    <td className="px-4 py-3 font-bold text-lg">{formatScore(fund.total_gpa_score)}</td>
+                                                    <td className="px-4 py-3 text-sm">{formatScore(fund.risk_score)}</td>
+                                                    <td className="px-4 py-3 text-sm">{formatScore(fund.return_score)}</td>
+                                                    <td className="px-4 py-3 text-sm font-medium">{formatScore(fund.total_rr_score)}</td>
+                                                </tr>
+                                                {expandedTicker === fund.ticker && (
+                                                    <tr>
+                                                        <td colSpan={10} className="px-6 py-4 bg-gray-50">
+                                                            <FundDetailPanel fund={fund} />
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between bg-white rounded-lg shadow px-4 py-3">
+                            <p className="text-sm text-gray-700">
+                                Showing <span className="font-medium">{(page-1)*limit + 1}</span> - <span className="font-medium">{Math.min(page*limit, total)}</span> of <span className="font-medium">{total}</span> funds
+                            </p>
+                            <div className="flex space-x-2">
+                                <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
+                                    className="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-100">Prev</button>
+                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                    let pageNum;
+                                    if (totalPages <= 5) pageNum = i + 1;
+                                    else if (page <= 3) pageNum = i + 1;
+                                    else if (page >= totalPages - 2) pageNum = totalPages - 4 + i;
+                                    else pageNum = page - 2 + i;
+                                    return (
+                                        <button key={pageNum} onClick={() => setPage(pageNum)}
+                                            className={`px-3 py-1 border rounded text-sm ${page === pageNum ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-100'}`}>
+                                            {pageNum}
+                                        </button>
+                                    );
+                                })}
+                                <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page >= totalPages}
+                                    className="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-100">Next</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== FUND DETAIL PANEL ====================
+        const FundDetailPanel = ({ fund }) => {
+            const scores = fund.scores || {};
+
+            const ScoreItem = ({ label, value, decimals = 2 }) => (
+                <div className="flex justify-between py-1">
+                    <span className="text-sm text-gray-600">{label}</span>
+                    <span className="text-sm font-medium">{formatScore(value, decimals)}</span>
+                </div>
+            );
+
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Aggregate Scores */}
+                    <div>
+                        <h4 className="font-semibold text-gray-800 mb-3 text-sm uppercase tracking-wide">Aggregate Scores</h4>
+                        <div className="bg-white rounded-lg p-4 space-y-2">
+                            <div className="flex justify-between py-2 border-b">
+                                <span className="font-semibold">GPA Score</span>
+                                <span className="text-xl font-bold text-blue-600">{formatScore(scores.total_gpa_score)}</span>
+                            </div>
+                            <ScoreItem label="Risk Score" value={scores.risk_score} />
+                            <ScoreItem label="Return Score" value={scores.return_score} />
+                            <ScoreItem label="Total RR Score" value={scores.total_rr_score} />
+                            <div className="border-t pt-2 mt-2">
+                                <ScoreItem label="Market Cap Adj" value={scores.market_cap_score} />
+                                <ScoreItem label="Turnover Adj" value={scores.turnover_score} />
+                            </div>
+                            {(fund.category_rank || fund.global_rank) && (
+                                <div className="border-t pt-2 mt-2">
+                                    {fund.category_rank && <ScoreItem label="Category Rank" value={`#${fund.category_rank}`} />}
+                                    {fund.global_rank && <ScoreItem label="Global Rank" value={`#${fund.global_rank}`} />}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Risk Sub-Scores */}
+                    <div>
+                        <h4 className="font-semibold text-gray-800 mb-3 text-sm uppercase tracking-wide">Risk Sub-Scores</h4>
+                        <div className="bg-white rounded-lg p-4 space-y-1">
+                            <ScoreItem label="Beta" value={scores.beta_score} />
+                            <ScoreItem label="R-Squared" value={scores.r_squared_score} />
+                            <ScoreItem label="Up Capture" value={scores.up_capture_score} />
+                            <ScoreItem label="Down Capture" value={scores.down_capture_score} />
+                            <ScoreItem label="Sharpe" value={scores.sharpe_score} />
+                            <ScoreItem label="Tracking Error" value={scores.tracking_error_score} />
+                            <ScoreItem label="Sortino" value={scores.sortino_score} />
+                            <ScoreItem label="Treynor" value={scores.treynor_score} />
+                            <ScoreItem label="Info Ratio" value={scores.info_ratio_score} />
+                            <ScoreItem label="Kurtosis" value={scores.kurtosis_score} />
+                            <ScoreItem label="Drawdown" value={scores.drawdown_score} />
+                            <ScoreItem label="Skewness" value={scores.skewness_score} />
+                        </div>
+                    </div>
+
+                    {/* Return Sub-Scores + Fund Info */}
+                    <div>
+                        <h4 className="font-semibold text-gray-800 mb-3 text-sm uppercase tracking-wide">Return Sub-Scores</h4>
+                        <div className="bg-white rounded-lg p-4 space-y-1">
+                            <ScoreItem label="Alpha" value={scores.alpha_score} />
+                            <ScoreItem label="Yield" value={scores.yield_score} />
+                            <ScoreItem label="Relative Return" value={scores.relative_return_score} decimals={4} />
+                            <ScoreItem label="Price" value={scores.price_score} />
+                            <ScoreItem label="Fee" value={scores.fee_score} />
+                        </div>
+
+                        <h4 className="font-semibold text-gray-800 mt-4 mb-3 text-sm uppercase tracking-wide">Fund Info</h4>
+                        <div className="bg-white rounded-lg p-4 space-y-1">
+                            {fund.net_expense_ratio != null && <ScoreItem label="Expense Ratio" value={`${(fund.net_expense_ratio * 100).toFixed(2)}%`} />}
+                            {fund.turnover != null && <ScoreItem label="Turnover" value={`${(fund.turnover * 100).toFixed(0)}%`} />}
+                            {fund.market_cap != null && <ScoreItem label="Market Cap" value={`$${fund.market_cap.toFixed(0)}M`} />}
+                            {fund.yield_pct != null && <ScoreItem label="Yield" value={`${(fund.yield_pct * 100).toFixed(2)}%`} />}
+                            {fund.fund_age_years != null && <ScoreItem label="Fund Age" value={`${Number(fund.fund_age_years).toFixed(1)} yrs`} />}
+                            {fund.pe_ratio != null && <ScoreItem label="P/E Ratio" value={Number(fund.pe_ratio).toFixed(1)} />}
+                            {fund.pb_ratio != null && <ScoreItem label="P/B Ratio" value={Number(fund.pb_ratio).toFixed(2)} />}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== MAIN APP ====================
+        const App = () => {
+            const [currentPage, setCurrentPage] = useState('rankings');
+            const [dataSummary, setDataSummary] = useState(null);
+            const [results, setResults] = useState(null);
+
+            return (
+                <div className="min-h-screen">
+                    <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+                    <main className="max-w-7xl mx-auto px-4 py-6">
+                        {currentPage === 'data' && <DataPage dataSummary={dataSummary} setDataSummary={setDataSummary} />}
+                        {currentPage === 'backtest' && <BacktestPage dataSummary={dataSummary} setResults={setResults} setCurrentPage={setCurrentPage} />}
+                        {currentPage === 'results' && <ResultsPage results={results} />}
+                        {currentPage === 'rankings' && <RankingsPage />}
+                    </main>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
